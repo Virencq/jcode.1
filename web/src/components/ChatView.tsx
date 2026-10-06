@@ -12,14 +12,17 @@
 
 import { AskUserCard, Thread } from 'jcode-ui'
 import { GoalBanner, ChatInput } from 'jcode-ui/product'
-import { useCallback } from 'react'
+import { ArrowUpRightIcon, FolderIcon } from '@heroicons/react/24/outline'
+import { useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useAppSelector } from '../app/hooks'
+import { useAppDispatch, useAppSelector } from '../app/hooks'
+import { openConversation } from '../app/store'
 import { useProductComposerHost } from '../app/composerHost'
 import kimiBackground from '../assets/kimi-light-background.webp'
 import zhipuBackground from '../assets/zhipu-light-background.webp'
 import { apiBase } from '../lib/apiBase'
 import { saveFileLink, validateServiceFileLink } from '../lib/saveFileLink'
+import { isTauri } from '../lib/useDesktop'
 import { ConversationLoadingView } from './ConversationLoadingView'
 import { RemoteConnectionNotice } from './RemoteConnectionNotice'
 
@@ -65,6 +68,7 @@ function PendingIndicator() {
 
 export function ChatView({ readOnly }: ChatViewProps) {
   const { t } = useTranslation()
+  const dispatch = useAppDispatch()
   const taskId = useAppSelector((s) => s.session.currentSessionId)
   const onDownloadFile = useCallback((href: string, fileName: string): boolean => {
     const base = apiBase || document.baseURI
@@ -121,6 +125,14 @@ export function ChatView({ readOnly }: ChatViewProps) {
   })
   const projectPath = useAppSelector((s) => s.session.projectPath)
   const workspaceKind = useAppSelector((s) => s.session.workspaceKind)
+  const tasks = useAppSelector((s) => s.session.tasks)
+  const recentTasks = useMemo(
+    () => tasks
+      .filter((task) => !task.archived && task.uuid !== taskId)
+      .sort((a, b) => Date.parse(b.updated_at || b.created_at) - Date.parse(a.updated_at || a.created_at))
+      .slice(0, 5),
+    [taskId, tasks],
+  )
   const backdropKind = useAppSelector((s) => {
     const provider = s.model.providers.find((candidate) => candidate.id === s.model.providerName)
     const model = provider?.models.find((candidate) => candidate.id === s.model.modelName)
@@ -182,7 +194,7 @@ export function ChatView({ readOnly }: ChatViewProps) {
         <ModelBackdrop kind={backdropKind} />
         <div className="welcome-aura" aria-hidden="true" />
         {/* Top half: hero floats above the centered composer. */}
-        <div className="welcome-hero flex min-h-0 flex-1 flex-col items-center justify-end pb-10">
+        <div className={`welcome-hero flex min-h-0 flex-col items-center ${isTauri ? 'flex-none justify-end pb-7 pt-[8vh]' : 'flex-1 justify-end pb-10'}`}>
           <div className="welcome-logo select-none">
             <span className="wl-dim">[</span>
             <span className="wl-j">J</span>
@@ -202,8 +214,45 @@ export function ChatView({ readOnly }: ChatViewProps) {
           <RemoteConnectionNotice />
           <ChatInput host={host} elevated pickerPlacement="bottom" onSent={() => { /* timeline auto-follows */ }} />
         </div>
+        {isTauri && (
+          <section className="welcome-recent z-[1] w-full max-w-4xl px-5 pb-8 pt-8" aria-label={t('nav.workspace')}>
+            <div className="mb-2 flex items-center justify-between border-b border-[var(--color-border)] pb-2">
+              <h3 className="text-[12px] font-semibold text-[var(--color-muted-foreground)]">{t('nav.workspace')}</h3>
+              <span className="text-[11px] tabular-nums text-[var(--color-muted-foreground)]">{recentTasks.length}</span>
+            </div>
+            {recentTasks.length === 0 ? (
+              <p className="py-4 text-center text-[12px] text-[var(--color-muted-foreground)]">{t('sidebar.noConversations')}</p>
+            ) : (
+              <div className="divide-y divide-[var(--color-border)]">
+                {recentTasks.map((task) => (
+                  <button
+                    key={task.uuid}
+                    type="button"
+                    onClick={() => void dispatch(openConversation({
+                      uuid: task.uuid,
+                      project: task.project,
+                      title: task.title,
+                      workspaceKind: task.workspace_kind,
+                    }))}
+                    className="group flex w-full min-w-0 items-center gap-3 py-3 text-left transition-colors hover:bg-[var(--color-muted)]/50"
+                  >
+                    <FolderIcon className="h-4 w-4 shrink-0 text-[var(--color-muted-foreground)]" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] font-medium text-[var(--color-foreground)]">{task.title?.trim() || t('sidebar.untitled')}</span>
+                      <span className="mt-0.5 block truncate text-[11px] text-[var(--color-muted-foreground)]">
+                        {task.workspace_kind === 'scratch' ? t('workspace.noProject') : projectName(task.project)}
+                      </span>
+                    </span>
+                    {task.running && <span className="shrink-0 text-[10px] text-[var(--color-accent-neutral)]">{t('sidebar.running')}</span>}
+                    <ArrowUpRightIcon className="h-3.5 w-3.5 shrink-0 text-[var(--color-muted-foreground)] opacity-0 transition-opacity group-hover:opacity-100" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
         {/* Bottom half balances the center */}
-        <div className="min-h-0 flex-1" aria-hidden="true" />
+        {!isTauri && <div className="min-h-0 flex-1" aria-hidden="true" />}
       </div>
     )
   }
